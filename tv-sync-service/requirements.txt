@@ -1,2 +1,1 @@
-flask_not_needed=true
 # stdlib only — no dependencies
