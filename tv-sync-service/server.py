@@ -153,6 +153,40 @@ tick(); setInterval(tick, 60000);
 """
 
 
+HOME_PAGE = """<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TV Sync Service</title>
+<style>
+  body{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;max-width:640px;
+       margin:40px auto;padding:0 20px;color:#1c2733;line-height:1.6}
+  .pill{display:inline-block;padding:4px 12px;border-radius:20px;font-size:13px;
+        background:#e8f5e9;color:#2e7d32}
+  .pill.off{background:#fce4ec;color:#c62828}
+  code{background:#f4f6f8;padding:2px 6px;border-radius:4px;font-size:13px}
+  li{margin:6px 0}
+</style></head><body>
+<h1>TV Sync Service</h1>
+<p>Status: <span class="pill" id="st">checking&hellip;</span></p>
+<p>Polls Hospitable for in-house guests and serves the data to the TV
+welcome-screen apps.</p>
+<h3>Endpoints</h3>
+<ul>
+  <li><code>/api/health</code> &mdash; service status</li>
+  <li><code>/api/properties</code> &mdash; property list</li>
+  <li><code>/api/now?property=&lt;uuid&gt;</code> &mdash; current guest for a property</li>
+  <li><code>/tv?property=&lt;uuid&gt;</code> &mdash; welcome-screen preview</li>
+  <li><code>/api/adverts</code> &mdash; advert library (GET list, POST upload)</li>
+</ul>
+<script>
+fetch('/api/health').then(r=>r.json()).then(j=>{
+  const el=document.getElementById('st');
+  el.textContent=j.live?'live \u00b7 updated '+j.updated_at:'demo mode';
+  if(!j.live)el.classList.add('off');
+}).catch(()=>{const el=document.getElementById('st');
+  el.textContent='unreachable';el.classList.add('off');});
+</script></body></html>
+"""
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "TVSync/1.0"
 
@@ -171,6 +205,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed, qs = self._parse()
+        if parsed.path == "/":
+            return self._send(200, HOME_PAGE, "text/html")
         if parsed.path == "/api/health":
             return self._send(200, {"ok": True, "live": _state["live"],
                                     "updated_at": _state["updated_at"]})
