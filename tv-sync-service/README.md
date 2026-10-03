@@ -61,3 +61,4 @@ Any always-on host works. Easiest options:
 
 Run `hospitable properties` (workspace skill) to list them, or
 `GET /api/properties` on a running server.
+redeploy trigger
