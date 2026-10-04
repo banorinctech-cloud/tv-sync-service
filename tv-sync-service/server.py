@@ -263,22 +263,64 @@ class Handler(BaseHTTPRequestHandler):
         ctype = self.headers.get("Content-Type", "")
         if "multipart/form-data" not in ctype:
             return self._send(400, {"error": "multipart upload required"})
-        import cgi
-        form = cgi.FieldStorage(fp=self.rfile, headers=self.headers,
-                                environ={"REQUEST_METHOD": "POST"})
-        if "file" not in form or not form["file"].filename:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            return self._send(400, {"error": "missing content length"})
+        if length <= 0 or length > 100 * 1024 * 1024:
+            return self._send(400, {"error": "bad content length"})
+        body = self.rfile.read(length)
+        # Manual multipart parse (no deprecated cgi module).
+        boundary = None
+        for part in ctype.split(";"):
+            part = part.strip()
+            if part.startswith("boundary="):
+                boundary = part[len("boundary="):].strip().strip('"')
+        if not boundary:
+            return self._send(400, {"error": "missing multipart boundary"})
+        delim = ("--" + boundary).encode()
+        fields = {}
+        files = {}
+        for chunk in body.split(delim):
+            if b'Content-Disposition' not in chunk:
+                continue
+            head, _, data = chunk.partition(b"\r\n\r\n")
+            if not data:
+                continue
+            data = data.rsplit(b"\r\n", 1)[0]
+            disp = ""
+            for line in head.decode("latin1").split("\r\n"):
+                if "Content-Disposition" in line:
+                    disp = line
+                    break
+            name = None
+            filename = None
+            for seg in disp.split(";"):
+                seg = seg.strip()
+                if seg.startswith("name="):
+                    name = seg[5:].strip().strip('"')
+                elif seg.startswith("filename="):
+                    filename = seg[9:].strip().strip('"')
+            if not name:
+                continue
+            if filename:
+                files[name] = (os.path.basename(filename), data)
+            else:
+                fields.setdefault(name, []).append(data.decode("utf-8", "replace"))
+        if "file" not in files or not files["file"][0]:
             return self._send(400, {"error": "file field required"})
         item_id = uuidlib.uuid4().hex[:12]
-        safe = "".join(c for c in os.path.basename(form["file"].filename)
+        orig_name, file_data = files["file"]
+        safe = "".join(c for c in orig_name
                        if c.isalnum() or c in "._-") or "upload.bin"
         fname = f"{item_id}_{safe}"
         with open(os.path.join(ADVERT_DIR, fname), "wb") as f:
-            f.write(form["file"].file.read())
+            f.write(file_data)
         try:
-            duration = int(form.getvalue("duration_secs", "10"))
+            duration = int((fields.get("duration_secs") or ["10"])[0])
         except (TypeError, ValueError):
             duration = 10
-        props = form.getlist("properties[]") or form.getlist("properties") or []
+        props = fields.get("properties[]") or fields.get("properties") or []
         items = load_adverts()
         items.append({"id": item_id, "filename": fname, "duration_secs": duration,
                       "properties": props,
