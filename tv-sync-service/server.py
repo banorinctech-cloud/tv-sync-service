@@ -56,12 +56,23 @@ def _hosp_get(path, params=None):
         return json.load(resp)
 
 
+def _parse_dt(s):
+    try:
+        dt = datetime.datetime.fromisoformat(s) if s else None
+    except (ValueError, TypeError):
+        return None
+    if dt is not None and dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt
+
+
 def poll_hospitable():
     """Refresh the current-guest cache from Hospitable."""
     try:
         today = datetime.date.today()
         today_s = today.isoformat()
         window_start = (today - datetime.timedelta(days=60)).isoformat()
+        now = datetime.datetime.now(datetime.timezone.utc)
         props = _hosp_get("/properties").get("data", [])
         out = {}
         # One request per property: the batched response carries no
@@ -77,7 +88,15 @@ def poll_hospitable():
                 st = (r.get("reservation_status") or {}).get("current", {}).get("category")
                 arr = (r.get("arrival_date") or "")[:10]
                 dep = (r.get("departure_date") or "")[:10]
-                if st == "accepted" and arr <= today_s < dep:
+                # Prefer exact check-in/out datetimes so the guest stays on
+                # screen until actual checkout time (not midnight UTC).
+                ci = _parse_dt(r.get("check_in"))
+                co = _parse_dt(r.get("check_out"))
+                if ci is not None and co is not None:
+                    is_current = (ci <= now < co)
+                else:
+                    is_current = (arr <= today_s < dep)
+                if st == "accepted" and is_current:
                     g = r.get("guest") or {}
                     current = {
                         "guest_name": (g.get("first_name", "") + " " + (g.get("last_name") or "")).strip(),
